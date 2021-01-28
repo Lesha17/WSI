@@ -13,6 +13,7 @@ def main():
     args_parser = ArgumentParser()
     args_parser.add_argument('--model', type=str)
     args_parser.add_argument('--tokenizer', type=str, default=None)
+    args_parser.add_argument('--dataset_type', type=str, default='bts-rnc')
     args_parser.add_argument('--datapath', type=str)
     args_parser.add_argument('--output_file', type=str)
 
@@ -38,9 +39,16 @@ def main():
     tokenizer = tokenizer_class.from_pretrained(tokenizer_name)
 
     print('Loading data')
-    datareader = data_readers.BtsRncReader(args.datapath, tokenizer,
+    if args.dataset_type == 'bts-rnc':
+        datareader = data_readers.BtsRncReader(args.datapath, tokenizer,
                                            max_length = args.max_length,
                                            replace_word_with_mask = args.replace_word_with_mask)
+    elif args.dataset_type == 'semeval-2013':
+        datareader = data_readers.SemEval2013Reader(args.datapath, tokenizer,
+                                               max_length=args.max_length,
+                                               replace_word_with_mask=args.replace_word_with_mask)
+    else:
+        raise AttributeError('Unsupported dataset type: ' + args.dataset_type)
     dataset = datareader.create_dataset()
 
     print('Forwarding data')

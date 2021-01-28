@@ -35,7 +35,7 @@ def main():
     target_metric = args.target_metric
     best_metric_value = 0
     best_cluster_num = 0
-    df = datareader._get_dataframe()
+    df = datareader.get_dataframe()
     for num_clusters in range(args.num_clusters_min, args.num_clusters_max + 1):
         print(f'Labelling data with {num_clusters} clusters')
         labels = make_labeling(datareader, bert_out, bert_layer=args.bert_layer, num_clusters=num_clusters)

@@ -2,6 +2,7 @@ import pandas
 import tqdm
 import torch
 import re
+import os
 
 
 def get_word_indices(row, encodings):
@@ -23,8 +24,20 @@ class BaseDataReader:
     def create_dataset(self, word: str = None):
         raise NotImplementedError()
 
+    def get_words(self):
+        raise NotImplementedError()
 
-class BtsRncReader:
+    def get_dataframe(self):
+        raise NotImplementedError()
+
+    def get_word_df_index(self, word: str):
+        raise NotImplementedError()
+
+    def __len__(self):
+        raise NotImplementedError()
+
+
+class BtsRncReader(BaseDataReader):
 
     def __init__(self, datapath: str, tokenizer,
                  progress: bool = False,
@@ -43,10 +56,10 @@ class BtsRncReader:
         self.dataframe = None
 
     def create_dataset(self, word: str = None):
-        df = self._get_dataframe()
+        df = self.get_dataframe()
 
         if word is not None:
-            df = df[self.get_word_df_index(word)]
+            df = df.loc[self.get_word_df_index(word)]
 
         data = df.iterrows()
 
@@ -98,17 +111,107 @@ class BtsRncReader:
         return results
 
     def get_words(self):
-        return self._get_dataframe().word.unique()
+        return self.get_dataframe().word.unique()
 
-    def _get_dataframe(self):
+    def get_dataframe(self):
         if self.dataframe is None:
             self.dataframe = pandas.read_csv(self.datapath, sep='\t')
         return self.dataframe
 
     def get_word_df_index(self, word: str):
-        df = self._get_dataframe()
-        df_index = df.word == word
-        return df_index
+        df = self.get_dataframe()
+        return df[df.word == word].index
 
     def __len__(self):
-        return len(self._get_dataframe())
+        return len(self.get_dataframe())
+
+
+class SemEval2013Reader(BaseDataReader):
+    def __init__(self, datapath, tokenizer,
+                 replace_word_with_mask: bool = False,
+                 max_length: int = 128):
+        self.datapath = datapath
+        self.tokenizer = tokenizer
+        self.replace_word_with_mask = replace_word_with_mask
+        self.max_length = max_length
+
+        self.dataframe = None
+        self.labels_dataframe = None
+        self.words_dataframe = None
+
+    def create_dataset(self, word: str = None):
+        df = self.get_dataframe()
+        labels_df = self._get_labels_dataframe()
+        if word is not None:
+            word_df_index = self.get_word_df_index(word)
+            df = df.loc[word_df_index]
+            labels_df = labels_df.loc[word_df_index]
+        pattern = re.compile(r'<b>(\w+.?\w*)</b>')
+        result = []
+        for index, row in df.iterrows():
+            context = row.snippet
+            if pandas.isna(context):
+                continue
+            if self.replace_word_with_mask:
+                replaced_with_mask = pattern.sub(self.tokenizer.mask_token, context)
+                encodings = self.tokenizer.encode_plus(replaced_with_mask,
+                                                       return_tensors='pt',
+                                                       padding='max_length',
+                                                       truncation = True,
+                                                       max_length=self.max_length,
+                                                       return_offsets_mapping=False)
+                encodings['given_word_mask'] = encodings['input_ids'] == self.tokenizer.mask_token_id
+
+                encodings = {k: v.squeeze() for k, v in encodings.items()}
+                encodings['label'] = labels_df.loc[index].sense_id
+                result.append(encodings)
+            else:
+                raise NotImplementedError('Building dataset without replacing target with mask is not supported')
+        return result
+
+    def get_word_df_index(self, word: str):
+        df = self.get_dataframe()
+        word_df = self._get_words_dataframe()
+        word_id = word_df[word_df.description == word].index[0]
+        return df[df.word_id == word_id].index
+
+    def get_dataframe(self):
+        if self.dataframe is None:
+            datapath = os.path.join(self.datapath, 'results.txt')
+            self.dataframe = pandas.read_csv(datapath, sep='\t', dtype={'ID': str})
+            self.dataframe['word_id'] = self.dataframe['ID'].apply(lambda id: int(id.split('.')[0]))
+            self.dataframe['snippet_id'] = self.dataframe['ID'].apply(lambda id: int(id.split('.')[1]))
+            self.dataframe = self.dataframe.set_index('ID')
+        return self.dataframe
+
+    def _get_labels_dataframe(self):
+        if self.labels_dataframe is None:
+            datapath = os.path.join(self.datapath, 'STRel.txt')
+            self.labels_dataframe = pandas.read_csv(datapath, sep='\t', dtype={'subTopicID': str, 'resultID': str})
+            self.labels_dataframe['word_id'] = self.labels_dataframe['subTopicID'].apply(
+                lambda id: int(id.split('.')[0]))
+            self.labels_dataframe['sense_id'] = self.labels_dataframe['subTopicID'].apply(
+                lambda id: int(id.split('.')[1]))
+            self.labels_dataframe = self.labels_dataframe.set_index('resultID')
+        return self.labels_dataframe
+
+    def _get_words_dataframe(self):
+        if self.words_dataframe is None:
+            datapath = os.path.join(self.datapath, 'topics.txt')
+            self.words_dataframe = pandas.read_csv(datapath, sep='\t', index_col='id')
+        return self.words_dataframe
+
+
+if __name__ == '__main__':
+    import transformers
+
+    tokenizer = transformers.AutoTokenizer.from_pretrained('bert-base-cased')
+    datapath = 'data/semeval-2013_task11_dataset'
+    datareader = SemEval2013Reader(datapath, tokenizer, replace_word_with_mask=True)
+    dataset = datareader.create_dataset()
+    print(len(dataset))
+    print(dataset[0])
+
+    df = datareader.get_dataframe()
+    df.loc[datareader.get_word_df_index('polaroid'), 'xyu'] = 'pidor'
+    print(df['xyu'])

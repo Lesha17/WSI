@@ -39,7 +39,7 @@ def make_labeling(datareader: BaseDataReader, bert_out,
     :return: a series with labels
     '''
 
-    result = pandas.Series([None] * len(datareader))
+    result = pandas.Series([None] * len(datareader), index=datareader.get_dataframe().index)
 
     dataset = datareader.create_dataset()
     given_word_mask = torch.stack([smpl['given_word_mask'] for smpl in dataset])
@@ -48,10 +48,10 @@ def make_labeling(datareader: BaseDataReader, bert_out,
     for word in datareader.get_words():
         word_index = datareader.get_word_df_index(word)
 
-        distances = calculate_distances(word_vectors[word_index], dist_metric)
+        distances = calculate_distances(word_vectors.loc[word_index], dist_metric)
         clusterer = clustering_alg(n_clusters=num_clusters, affinity='precomputed', linkage='average')
 
         labels = cluster_hidden(clusterer, distances)
-        result[word_index] = labels
+        result.loc[word_index] = labels
 
     return result

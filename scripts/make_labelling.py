@@ -1,7 +1,7 @@
 import torch
 import transformers
 from argparse import ArgumentParser
-from data_readers import BtsRncReader
+import data_readers
 from clustering import make_labeling
 
 
@@ -9,7 +9,9 @@ def main():
     arg_parser = ArgumentParser()
     arg_parser.add_argument('--tokenizer', type=str)
     arg_parser.add_argument('--bert_out_file', type=str)
-    arg_parser.add_argument('--data_file', type=str)
+    arg_parser.add_argument('--dataset_type', type=str, default='bts-rnc')
+    arg_parser.add_argument('--datapath', type=str)
+    #arg_parser.add_argument('--data_file', type=str)
     arg_parser.add_argument('--output_file', type=str)
 
     arg_parser.add_argument('--max_length', type=int, default=80)
@@ -26,12 +28,20 @@ def main():
     print('Loading bert out')
     bert_out = torch.load(args.bert_out_file)
 
-    datareader = BtsRncReader(args.data_file, tokenizer, max_length=args.max_length,
-                              replace_word_with_mask=args.replace_word_with_mask)
+    if args.dataset_type == 'bts-rnc':
+        datareader = data_readers.BtsRncReader(args.datapath, tokenizer,
+                                           max_length = args.max_length,
+                                           replace_word_with_mask = args.replace_word_with_mask)
+    elif args.dataset_type == 'semeval-2013':
+        datareader = data_readers.SemEval2013Reader(args.datapath, tokenizer,
+                                               max_length=args.max_length,
+                                               replace_word_with_mask=args.replace_word_with_mask)
+    else:
+        raise AttributeError('Unsupported dataset type: ' + args.dataset_type)
 
     print('Labelling data')
     labels = make_labeling(datareader, bert_out, bert_layer=args.bert_layer, num_clusters=args.num_clusters)
-    df = datareader._get_dataframe()
+    df = datareader.get_dataframe()
     df['predict_sense_id'] = labels
 
     df.to_csv(args.output_file, sep='\t', index=False)

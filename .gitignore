@@ -1,4 +1,6 @@
 *.zip
+*.tar.gz
 *.csv
 .idea/
 results/
+__pycache__
