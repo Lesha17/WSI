@@ -1,5 +1,6 @@
 import pandas
 import torch
+import numpy
 from scipy.spatial.distance import pdist, squareform
 from sklearn.cluster import AgglomerativeClustering
 
@@ -22,10 +23,10 @@ def calculate_distances(word_vectors, dist_metric):
     return distances
 
 
-def cluster_hidden(clusterer, distances):
-    if clusterer.n_clusters > distances.shape[0]:
-        raise AssertionError(f'Num clusters {clusterer.n_clusters} is greater than num words {distances.shape[0]}')
-    clustered_labels = clusterer.fit_predict(distances)
+def cluster_hidden(clusterer, vectors_or_distances):
+    if clusterer.n_clusters > vectors_or_distances.shape[0]:
+        raise AssertionError(f'Num clusters {clusterer.n_clusters} is greater than num words {vectors_or_distances.shape[0]}')
+    clustered_labels = clusterer.fit_predict(vectors_or_distances)
     return clustered_labels
 
 
@@ -39,19 +40,26 @@ def make_labeling(datareader: BaseDataReader, bert_out,
     :return: a series with labels
     '''
 
-    result = pandas.Series([None] * len(datareader), index=datareader.get_dataframe().index)
+    df = datareader.get_dataframe()
+    result = pandas.Series([-1] * len(datareader), index=df.index)
 
     dataset = datareader.create_dataset()
     given_word_mask = torch.stack([smpl['given_word_mask'] for smpl in dataset])
     word_vectors = word_vector_fn(bert_out, given_word_mask, bert_layer=bert_layer)
+    word_vector_norms = torch.norm(word_vectors, dim=-1)
+    nonzero_words = word_vector_norms > 0
 
     for word in datareader.get_words():
-        word_index = datareader.get_word_df_index(word)
+        word_mask = datareader.get_word_df_mask(word) & nonzero_words
+        num_words = numpy.sum(word_mask)
+        if num_words < num_clusters:
+            print(f'Num clusters {num_clusters} is greater than num words {num_words} for {word}')
+            continue
 
-        distances = calculate_distances(word_vectors.loc[word_index], dist_metric)
-        clusterer = clustering_alg(n_clusters=num_clusters, affinity='precomputed', linkage='average')
+        clusterer = clustering_alg(n_clusters=num_clusters, affinity=dist_metric, linkage='average')
 
-        labels = cluster_hidden(clusterer, distances)
-        result.loc[word_index] = labels
+        labels = cluster_hidden(clusterer, word_vectors[word_mask])
+        result[word_mask] = labels
+
 
     return result

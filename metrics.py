@@ -4,6 +4,8 @@ import numpy
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 from scipy.optimize import linear_sum_assignment
 
+from data_readers import BaseDataReader
+
 
 def acc(y_true, y_pred):
     y_true = y_true.astype(numpy.int64)
@@ -23,10 +25,12 @@ def calculate_metrics(true_labels, clustered_labels):
             'ARI': adjusted_rand_score(true_labels, clustered_labels)}
 
 
-def calculate_metrics_on_labeled_data(gold_df, labeled_df):
+def calculate_metrics_on_labeled_data(gold_datareader: BaseDataReader, labeled_datareader: BaseDataReader):
     result_per_word = {}
-    for word in gold_df.word.unique():
-        word_index = gold_df.word == word
+    gold_df = gold_datareader.get_dataframe()
+    labeled_df = labeled_datareader.get_dataframe()
+    for word in gold_datareader.get_words():
+        word_index = gold_datareader.get_word_df_mask(word)
         result_per_word[word] = calculate_metrics(gold_df[word_index].gold_sense_id.to_numpy(),
                                                   labeled_df[word_index].predict_sense_id.to_numpy())
     metrics_values = defaultdict(list)

@@ -13,7 +13,10 @@ def to_device(batch, device='cuda'):
 
 def get_word_vector_avg(bert_out, given_word_mask, bert_layer=-1):
     masked_out = bert_out[bert_layer] * given_word_mask.unsqueeze(-1)
-    return torch.sum(masked_out, dim=1) / torch.sum(given_word_mask, dim=1).unsqueeze(-1)
+    masked_out_sum = torch.sum(masked_out, dim=1)
+    mask_sum = torch.sum(given_word_mask, dim=1)
+    mask_sum[mask_sum == 0] = 1 # to avoid division by zero
+    return masked_out_sum / mask_sum.unsqueeze(-1)
 
 
 def get_word_vector_first(bert_out, given_word_mask, bert_layer=-1):

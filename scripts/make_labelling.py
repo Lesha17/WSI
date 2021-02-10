@@ -41,8 +41,8 @@ def main():
 
     print('Labelling data')
     labels = make_labeling(datareader, bert_out, bert_layer=args.bert_layer, num_clusters=args.num_clusters)
+    datareader.set_predict_labels(labels)
     df = datareader.get_dataframe()
-    df['predict_sense_id'] = labels
 
     df.to_csv(args.output_file, sep='\t', index=False)
 

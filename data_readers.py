@@ -21,6 +21,10 @@ def get_word_indices(row, encodings):
 
 
 class BaseDataReader:
+    def __init__(self):
+        self.dataframe = None
+        self.labels_dataframe = None
+
     def create_dataset(self, word: str = None):
         raise NotImplementedError()
 
@@ -28,9 +32,26 @@ class BaseDataReader:
         raise NotImplementedError()
 
     def get_dataframe(self):
+        if self.dataframe is None:
+            self.dataframe = self.create_dataframe()
+        return self.dataframe
+
+    def create_dataframe(self):
         raise NotImplementedError()
 
-    def get_word_df_index(self, word: str):
+    def get_labels_dataframe(self):
+        if self.labels_dataframe is None:
+            self.labels_dataframe = self.create_labels_dataframe()
+        return self.labels_dataframe
+
+    def create_labels_dataframe(self):
+        raise NotImplementedError()
+
+    def set_predict_labels(self, labels):
+        df = self.get_dataframe()
+        df['predict_sense_id'] = labels
+
+    def get_word_df_mask(self, word: str):
         raise NotImplementedError()
 
     def __len__(self):
@@ -59,7 +80,7 @@ class BtsRncReader(BaseDataReader):
         df = self.get_dataframe()
 
         if word is not None:
-            df = df.loc[self.get_word_df_index(word)]
+            df = df[self.get_word_df_mask(word)]
 
         data = df.iterrows()
 
@@ -113,14 +134,15 @@ class BtsRncReader(BaseDataReader):
     def get_words(self):
         return self.get_dataframe().word.unique()
 
-    def get_dataframe(self):
-        if self.dataframe is None:
-            self.dataframe = pandas.read_csv(self.datapath, sep='\t')
-        return self.dataframe
+    def create_dataframe(self):
+        return pandas.read_csv(self.datapath, sep='\t')
 
-    def get_word_df_index(self, word: str):
+    def create_labels_dataframe(self):
+        return self.get_dataframe()
+
+    def get_word_df_mask(self, word: str):
         df = self.get_dataframe()
-        return df[df.word == word].index
+        return df.word == word
 
     def __len__(self):
         return len(self.get_dataframe())
@@ -141,11 +163,9 @@ class SemEval2013Reader(BaseDataReader):
 
     def create_dataset(self, word: str = None):
         df = self.get_dataframe()
-        labels_df = self._get_labels_dataframe()
         if word is not None:
-            word_df_index = self.get_word_df_index(word)
-            df = df.loc[word_df_index]
-            labels_df = labels_df.loc[word_df_index]
+            word_df_mask = self.get_word_df_mask(word)
+            df = df[word_df_mask]
         pattern = re.compile(r'<b>(\w+.?\w*)</b>')
         result = []
         for index, row in df.iterrows():
@@ -163,43 +183,52 @@ class SemEval2013Reader(BaseDataReader):
                 encodings['given_word_mask'] = encodings['input_ids'] == self.tokenizer.mask_token_id
 
                 encodings = {k: v.squeeze() for k, v in encodings.items()}
-                encodings['label'] = labels_df.loc[index].sense_id
+                encodings['label'] = df.loc[index].gold_sense_id
                 result.append(encodings)
             else:
                 raise NotImplementedError('Building dataset without replacing target with mask is not supported')
         return result
 
-    def get_word_df_index(self, word: str):
+    def get_word_df_mask(self, word: str):
         df = self.get_dataframe()
         word_df = self._get_words_dataframe()
         word_id = word_df[word_df.description == word].index[0]
-        return df[df.word_id == word_id].index
+        return df.word_id == word_id
 
-    def get_dataframe(self):
-        if self.dataframe is None:
-            datapath = os.path.join(self.datapath, 'results.txt')
-            self.dataframe = pandas.read_csv(datapath, sep='\t', dtype={'ID': str})
-            self.dataframe['word_id'] = self.dataframe['ID'].apply(lambda id: int(id.split('.')[0]))
-            self.dataframe['snippet_id'] = self.dataframe['ID'].apply(lambda id: int(id.split('.')[1]))
-            self.dataframe = self.dataframe.set_index('ID')
-        return self.dataframe
+    def create_dataframe(self):
+        datapath = os.path.join(self.datapath, 'results.txt')
+        dataframe = pandas.read_csv(datapath, sep='\t', dtype={'ID': str})
+        dataframe = dataframe.dropna(subset=['snippet'])
+        dataframe['word_id'] = dataframe['ID'].apply(lambda id: int(id.split('.')[0]))
+        dataframe['snippet_id'] = dataframe['ID'].apply(lambda id: int(id.split('.')[1]))
+        dataframe = dataframe.set_index('ID')
+        labels_df = self.get_labels_dataframe()
+        if 'gold_sense_id' in labels_df:
+            dataframe['gold_sense_id'] = labels_df.loc[dataframe.index, 'gold_sense_id']
+        return dataframe
 
-    def _get_labels_dataframe(self):
-        if self.labels_dataframe is None:
-            datapath = os.path.join(self.datapath, 'STRel.txt')
-            self.labels_dataframe = pandas.read_csv(datapath, sep='\t', dtype={'subTopicID': str, 'resultID': str})
-            self.labels_dataframe['word_id'] = self.labels_dataframe['subTopicID'].apply(
-                lambda id: int(id.split('.')[0]))
-            self.labels_dataframe['sense_id'] = self.labels_dataframe['subTopicID'].apply(
-                lambda id: int(id.split('.')[1]))
-            self.labels_dataframe = self.labels_dataframe.set_index('resultID')
-        return self.labels_dataframe
+    def create_labels_dataframe(self):
+        datapath = os.path.join(self.datapath, 'STRel.txt')
+        labels_dataframe = pandas.read_csv(datapath, sep='\t', dtype={'subTopicID': str, 'resultID': str})
+        labels_dataframe['word_id'] = labels_dataframe['subTopicID'].apply(
+            lambda id: int(id.split('.')[0]))
+        labels_dataframe['gold_sense_id'] = labels_dataframe['subTopicID'].apply(
+            lambda id: int(id.split('.')[1]))
+        labels_dataframe = labels_dataframe.set_index('resultID')
+        return labels_dataframe
 
     def _get_words_dataframe(self):
         if self.words_dataframe is None:
             datapath = os.path.join(self.datapath, 'topics.txt')
             self.words_dataframe = pandas.read_csv(datapath, sep='\t', index_col='id')
         return self.words_dataframe
+
+    def get_words(self):
+        word_df = self._get_words_dataframe()
+        return word_df.description.unique()
+
+    def __len__(self):
+        return len(self.get_dataframe())
 
 
 if __name__ == '__main__':
@@ -213,5 +242,5 @@ if __name__ == '__main__':
     print(dataset[0])
 
     df = datareader.get_dataframe()
-    df.loc[datareader.get_word_df_index('polaroid'), 'xyu'] = 'pidor'
+    df[datareader.get_word_df_mask('polaroid'), 'xyu'] = 'pidor'
     print(df['xyu'])
