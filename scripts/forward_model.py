@@ -5,6 +5,8 @@ Forwads model and saves its outputs to the specified file
 from argparse import ArgumentParser
 import torch
 import transformers
+
+import context_masking
 import data_readers
 
 from vectorizing import get_all_vectors
@@ -13,6 +15,7 @@ def main():
     args_parser = ArgumentParser()
     args_parser.add_argument('--model', type=str)
     args_parser.add_argument('--tokenizer', type=str, default=None)
+    args_parser.add_argument('--context_masker', type=str, default='dont_mask')
     args_parser.add_argument('--dataset_type', type=str, default='bts-rnc')
     args_parser.add_argument('--datapath', type=str)
     args_parser.add_argument('--output_file', type=str)
@@ -20,8 +23,7 @@ def main():
     args_parser.add_argument('--batch_size', type=int, default=64)
 
     # DataReader arguments
-    args_parser.add_argument('--max_length', type=int, default=80)
-    args_parser.add_argument('--replace_word_with_mask', type=bool, default=False)
+    args_parser.add_argument('--max_length', type=int, default=None)
 
     args = args_parser.parse_args()
 
@@ -38,18 +40,20 @@ def main():
     print('Loading tokenizer')
     tokenizer = tokenizer_class.from_pretrained(tokenizer_name)
 
+    context_masker = context_masking.CONTEXT_MASKERS[args.context_masker]
+    max_len = args.max_length or model.config.max_position_embeddings
+
     print('Loading data')
     if args.dataset_type == 'bts-rnc':
         datareader = data_readers.BtsRncReader(args.datapath, tokenizer,
-                                           max_length = args.max_length,
-                                           replace_word_with_mask = args.replace_word_with_mask)
+                                           max_length = max_len)
     elif args.dataset_type == 'semeval-2013':
         datareader = data_readers.SemEval2013Reader(args.datapath, tokenizer,
-                                               max_length=args.max_length,
-                                               replace_word_with_mask=args.replace_word_with_mask)
+                                               max_length=max_len)
     else:
         raise AttributeError('Unsupported dataset type: ' + args.dataset_type)
     dataset = datareader.create_dataset()
+    dataset = context_masking.apply_context_masking_to_dataset(dataset, context_masker, tokenizer.mask_token_id)
 
     print('Forwarding data')
     all_hidden_states = get_all_vectors(dataset, model, batch_size=args.batch_size)

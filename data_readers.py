@@ -5,19 +5,19 @@ import re
 import os
 
 
-def get_word_indices(row, encodings):
-    positions_str = re.split(r',\s*', row['positions'])
-    offset_mapping_iter = enumerate(list(encodings['offset_mapping'][0]))
-    index, current_mapping = next(offset_mapping_iter)
-    word_indices = []
-    for pos_str in positions_str:
-        start_pos, end_pos = (int(p) for p in pos_str.split('-'))
-        while current_mapping is not None and current_mapping[0] < start_pos:
-            index, current_mapping = next(offset_mapping_iter, (None, None))
-        while current_mapping is not None and current_mapping[1] <= end_pos + 1:
-            word_indices.append(index)
-            index, current_mapping = next(offset_mapping_iter, (None, None))
-    return word_indices
+def get_word_token_ids(all_token_positions, word_positions):
+    all_positions_iter = enumerate(all_token_positions)
+    i, sos_pos = next(all_positions_iter, (None, None))
+    i, current_pos = next(all_positions_iter, (None, None))
+    result = []
+    for word_start, word_end in word_positions:
+        while current_pos is not None and current_pos[0] < word_start:
+            i, current_pos = next(all_positions_iter, (None, None))
+        while current_pos is not None and 0 < current_pos[1] <= word_end:
+            result.append(i)
+            i, current_pos = next(all_positions_iter, (None, None))
+
+    return result
 
 
 class BaseDataReader:
@@ -149,44 +149,75 @@ class BtsRncReader(BaseDataReader):
 
 
 class SemEval2013Reader(BaseDataReader):
+    PATTERN = re.compile(r'<b>(.+?)</b>')
+
     def __init__(self, datapath, tokenizer,
-                 replace_word_with_mask: bool = False,
-                 max_length: int = 128):
+                 max_length: int = 512):
         self.datapath = datapath
         self.tokenizer = tokenizer
-        self.replace_word_with_mask = replace_word_with_mask
         self.max_length = max_length
 
         self.dataframe = None
         self.labels_dataframe = None
         self.words_dataframe = None
 
+    @staticmethod
+    def get_match_positions(match):
+        outer_span = match.span(0)
+        inner_span = match.span(1)
+        return outer_span[0], inner_span[0], inner_span[1], outer_span[1]
+
+    @staticmethod
+    def get_word_spans_positions(context):
+        return [SemEval2013Reader.get_match_positions(m) for m in SemEval2013Reader.PATTERN.finditer(context)]
+
+    @staticmethod
+    def clear_tags_and_get_positions(context):
+        word_spans_positions = SemEval2013Reader.get_word_spans_positions(context)
+        prev_position = 0
+        parts = []
+        positions = []
+        current_diff = 0
+        for outer_start, inner_start, inner_end, outer_end in word_spans_positions:
+            parts.append(context[prev_position:outer_start])
+            parts.append(context[inner_start:inner_end])
+            prev_position = outer_end
+
+            current_diff += inner_start - outer_start
+            positions.append((inner_start - current_diff, inner_end - current_diff))
+            current_diff += outer_end - inner_end
+        parts.append(context[prev_position:])
+        return ''.join(parts), positions
+
     def create_dataset(self, word: str = None):
         df = self.get_dataframe()
         if word is not None:
             word_df_mask = self.get_word_df_mask(word)
             df = df[word_df_mask]
-        pattern = re.compile(r'<b>(\w+.?\w*)</b>')
         result = []
         for index, row in df.iterrows():
             context = row.snippet
             if pandas.isna(context):
-                continue
-            if self.replace_word_with_mask:
-                replaced_with_mask = pattern.sub(self.tokenizer.mask_token, context)
-                encodings = self.tokenizer.encode_plus(replaced_with_mask,
-                                                       return_tensors='pt',
-                                                       padding='max_length',
-                                                       truncation = True,
-                                                       max_length=self.max_length,
-                                                       return_offsets_mapping=False)
-                encodings['given_word_mask'] = encodings['input_ids'] == self.tokenizer.mask_token_id
+                context = ''
 
-                encodings = {k: v.squeeze() for k, v in encodings.items()}
-                encodings['label'] = df.loc[index].gold_sense_id
-                result.append(encodings)
-            else:
-                raise NotImplementedError('Building dataset without replacing target with mask is not supported')
+            clear_context, word_positions = SemEval2013Reader.clear_tags_and_get_positions(context)
+
+            encodings = self.tokenizer.encode_plus(clear_context,
+                                                   return_tensors='pt',
+                                                   padding='max_length',
+                                                   truncation=True,
+                                                   max_length=self.max_length,
+                                                   return_offsets_mapping=True)
+            encodings = {k: v.squeeze() for k, v in encodings.items()}
+            word_token_ids = get_word_token_ids(encodings['offset_mapping'], word_positions)
+
+            encodings['given_word_mask'] = torch.zeros_like(encodings['input_ids'])
+            encodings['given_word_mask'][word_token_ids] = 1
+            encodings['word_token_ids'] = word_token_ids
+
+            encodings['label'] = df.loc[index].gold_sense_id
+            result.append(encodings)
+
         return result
 
     def get_word_df_mask(self, word: str):
