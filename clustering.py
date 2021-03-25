@@ -31,7 +31,7 @@ def cluster_hidden(clusterer, vectors_or_distances):
 
 
 def make_labeling(datareader: BaseDataReader, bert_out,
-                  word_vector_fn=vectorizing.get_word_vector_avg, bert_layer: int = -1,
+                  word_vector_fn=vectorizing.get_avg_word_tokens_vector, bert_layer: int = -1,
                   dist_metric='cosine',
                   clustering_alg: callable = AgglomerativeClustering, num_clusters: int = 2):
     '''
@@ -44,8 +44,7 @@ def make_labeling(datareader: BaseDataReader, bert_out,
     result = pandas.Series([-1] * len(datareader), index=df.index)
 
     dataset = datareader.create_dataset()
-    given_word_mask = torch.stack([smpl['given_word_mask'] for smpl in dataset])
-    word_vectors = word_vector_fn(bert_out, given_word_mask, bert_layer=bert_layer)
+    word_vectors = word_vector_fn(bert_out, dataset, bert_layer=bert_layer)
     word_vector_norms = torch.norm(word_vectors, dim=-1)
     nonzero_words = word_vector_norms > 0
 
