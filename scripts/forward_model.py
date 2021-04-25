@@ -50,10 +50,12 @@ def main():
     elif args.dataset_type == 'semeval-2013':
         datareader = data_readers.SemEval2013Reader(args.datapath, tokenizer,
                                                max_length=max_len)
+    elif args.dataset_type == 'semeval-2013-subtopics':
+        datareader = data_readers.SemEval2013SubTopicsReader(args.datapath, tokenizer, max_length=max_len)
     else:
         raise AttributeError('Unsupported dataset type: ' + args.dataset_type)
     dataset = datareader.create_dataset()
-    dataset = context_masking.apply_context_masking_to_dataset(dataset, context_masker, tokenizer.mask_token_id)
+    dataset = context_masking.apply_context_masking_to_dataset(dataset, context_masker, tokenizer)
 
     print('Forwarding data')
     all_hidden_states = get_all_vectors(dataset, model, batch_size=args.batch_size)

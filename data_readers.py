@@ -262,6 +262,52 @@ class SemEval2013Reader(BaseDataReader):
         return len(self.get_dataframe())
 
 
+class SemEval2013SubTopicsReader(BaseDataReader):
+
+    def __init__(self, datapath, tokenizer,
+                 max_length: int = 512):
+        super(SemEval2013SubTopicsReader, self).__init__()
+
+        self.datapath = datapath
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+
+    def create_dataset(self, word: str = None):
+        df = self.get_dataframe()
+        result = []
+        for index, row in df.iterrows():
+            description = row['description']
+
+            encodings = self.tokenizer.encode_plus(description,
+                                                   return_tensors='pt',
+                                                   padding='max_length',
+                                                   truncation=True,
+                                                   max_length=self.max_length)
+            encodings = {k: v.squeeze() for k, v in encodings.items()}
+
+            encodings['given_word_mask'] = torch.zeros_like(encodings['input_ids'])
+            encodings['word_token_ids'] = []
+
+            encodings['label'] = row.gold_sense_id
+            result.append(encodings)
+        return result
+
+
+    def create_dataframe(self):
+        datapath = os.path.join(self.datapath, 'subTopics.txt')
+        dataframe = pandas.read_csv(datapath, sep='\t', dtype={'ID': str})
+        dataframe['word_id'] = dataframe['ID'].apply(lambda id: int(id.split('.')[0]))
+        dataframe['gold_sense_id'] = dataframe['ID'].apply(lambda id: int(id.split('.')[1]))
+        dataframe = dataframe.set_index('ID')
+        return dataframe
+
+    def create_labels_dataframe(self):
+        return self.get_dataframe()
+
+    def __len__(self):
+        return len(self.get_dataframe())
+
+
 if __name__ == '__main__':
     import transformers
 

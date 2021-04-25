@@ -2,7 +2,7 @@
 
 for tokenizer in bert-base-cased  bert-base-uncased # bert-large-cased  bert-large-uncased
 do
-  for masking_type in all_word_tokens dont_mask first_token next_token previous_and_next_token previous_token
+  for masking_type in all_word_tokens dont_mask first_token next_token previous_and_next_token previous_token word_and_mask mask_and_word
   do
     for word_vector_fn in avg_word_tokens_vector avg_context_vector avg_context_without_word_tokens first_word_token_vector first_context_vector previous_token_vector next_token_vector
     do

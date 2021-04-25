@@ -96,6 +96,7 @@ def forward(batch, bertModel, bert_gradients=False):
 
 
 def get_all_vectors(dataset, bertModel, batch_size=64, progress=False):
+    dataset = [{k: smpl[k] for k in ['input_ids', 'attention_mask', 'token_type_ids', 'given_word_mask']} for smpl in dataset]
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, pin_memory=True, shuffle=False)
     result_batches = []
     if progress:
