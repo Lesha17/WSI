@@ -9,12 +9,14 @@ import transformers
 import context_masking
 import data_readers
 
-from vectorizing import get_all_vectors
+import vectorizing
 
 def main():
     args_parser = ArgumentParser()
     args_parser.add_argument('--model', type=str)
     args_parser.add_argument('--tokenizer', type=str, default=None)
+    args_parser.add_argument('--result_type', type=str, default=vectorizing.RESULT_TYPE_ALL_HIDDEN,
+                             choices=[vectorizing.RESULT_TYPE_POOLER_OUT, vectorizing.RESULT_TYPE_ALL_HIDDEN])
     args_parser.add_argument('--context_masker', type=str, default='dont_mask')
     args_parser.add_argument('--dataset_type', type=str, default='bts-rnc')
     args_parser.add_argument('--datapath', type=str)
@@ -58,7 +60,8 @@ def main():
     dataset = context_masking.apply_context_masking_to_dataset(dataset, context_masker, tokenizer)
 
     print('Forwarding data')
-    all_hidden_states = get_all_vectors(dataset, model, batch_size=args.batch_size)
+    all_hidden_states = vectorizing.get_all_vectors(dataset, model, batch_size=args.batch_size,
+                                                    result_type=args.result_type)
 
     print('Number of layers:', len(all_hidden_states))
     print('Shape:', all_hidden_states[0].shape)

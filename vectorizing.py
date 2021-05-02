@@ -1,6 +1,8 @@
 import torch
 import tqdm
 
+RESULT_TYPE_ALL_HIDDEN = 'all_hidden'
+RESULT_TYPE_POOLER_OUT = 'pooler_out'
 
 def get_model_inputs(batch):
     input_keys = ['input_ids', 'attention_mask']
@@ -85,30 +87,42 @@ def get_next_token_vector(bert_out, dataset, bert_layer=-1):
     return get_given_token_vector(bert_out, next_token_id, bert_layer=bert_layer)
 
 
-def forward(batch, bertModel, bert_gradients=False):
+def get_sentence_embedding(bert_out, dataset, bert_layer=-1):
+    return bert_out[bert_layer].squeeze(-1)
+
+
+def forward(batch, bertModel, bert_gradients=False, output_hidden_states=True):
     model_inputs = to_device(get_model_inputs(batch), device=bertModel.device)
     if bert_gradients:
-        bert_out = bertModel(**model_inputs, output_hidden_states=True)
+        bert_out = bertModel(**model_inputs, output_hidden_states=output_hidden_states)
     else:
         with torch.no_grad():
-            bert_out = bertModel(**model_inputs, output_hidden_states=True)
+            bert_out = bertModel(**model_inputs, output_hidden_states=output_hidden_states)
     return bert_out
 
 
-def get_all_vectors(dataset, bertModel, batch_size=64, progress=False):
+def get_all_vectors(dataset, bertModel, batch_size=64, progress=False, result_type=RESULT_TYPE_ALL_HIDDEN):
     dataset = [{k: smpl[k] for k in ['input_ids', 'attention_mask', 'token_type_ids', 'given_word_mask']} for smpl in dataset]
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, pin_memory=True, shuffle=False)
-    result_batches = []
+    result_batches = [[]]
     if progress:
         dataloader = tqdm.tqdm(dataloader)
     for batch in dataloader:
-        bert_out = forward(batch, bertModel)
-        hidden_states = bert_out[2]
-        for layer_num, hidden in enumerate(hidden_states):
-            hidden = hidden.detach().to('cpu')
-            if len(result_batches) <= layer_num:
-                result_batches.append([])
-            result_batches[layer_num].append(hidden)
+        if result_type == RESULT_TYPE_ALL_HIDDEN:
+            bert_out = forward(batch, bertModel, output_hidden_states=True)
+            hidden_states = bert_out[2]
+            for layer_num, hidden in enumerate(hidden_states):
+                hidden = hidden.detach().to('cpu')
+                if len(result_batches) <= layer_num:
+                    result_batches.append([])
+                result_batches[layer_num].append(hidden)
+        elif result_type == RESULT_TYPE_POOLER_OUT:
+            bert_out = forward(batch, bertModel, output_hidden_states=False)
+            pooler_out = bert_out[1].detach().to('cpu')
+            result_batches[0].append(pooler_out)
+        else:
+            raise AttributeError('Unknown result_type: ' + result_type)
+
 
     result = []
     for layer_batches in result_batches:
@@ -123,5 +137,6 @@ WORD_VECTOR_FNS = {
     'first_word_token_vector': get_first_word_token_vector,
     'first_context_vector': get_first_context_vector,
     'previous_token_vector': get_previous_token_vector,
-    'next_token_vector': get_next_token_vector
+    'next_token_vector': get_next_token_vector,
+    'sent_emb': get_sentence_embedding
 }
